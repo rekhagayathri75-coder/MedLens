@@ -2,13 +2,11 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { extractDocumentText } from "./lib/documentText";
 import { cloudPersistenceEnabled, supabase } from "./lib/supabase";
 import {
-  SAMPLE_PATIENT,
-  SAMPLE_REPORTS,
-  SAMPLE_SUMMARY,
-  SAMPLE_AUDIT_LOG,
   SAMPLE_RAW_REPORT_TEXT,
+  SCENARIOS,
 } from "./lib/sampleData";
 import { parseReportTextLocally, generateLocalSummary } from "./lib/localParser";
+import { lookupBiomarkerInfo } from "./lib/biomarkerDictionary";
 import {
   Activity,
   HeartPulse,
@@ -42,11 +40,15 @@ import {
   Droplets,
   Layers,
   Dna,
+  Send,
+  Table,
+  Copy,
+  HelpCircle,
 } from "lucide-react";
 
 /* ---------------------------------------------------------------
    MedLens — Design System & Tokens
-   Editorial ledger warmth meets modern SaaS precision.
+   Editorial ledger warmth meets modern clinical precision.
 ------------------------------------------------------------------*/
 const C = {
   page: "#F8F6F1",
@@ -142,13 +144,13 @@ function getBiomarkerCategory(testName = "") {
   if (n.includes("glucose") || n.includes("a1c") || n.includes("insulin")) {
     return { name: "Metabolic", color: "#B45309", bg: "#FEF3C7", icon: Droplets };
   }
-  if (n.includes("cholesterol") || n.includes("ldl") || n.includes("hdl") || n.includes("triglyceride")) {
+  if (n.includes("cholesterol") || n.includes("ldl") || n.includes("hdl") || n.includes("triglyceride") || n.includes("apolipoprotein")) {
     return { name: "Lipids", color: "#0F766E", bg: "#CCFBF1", icon: HeartPulse };
   }
   if (n.includes("creatinine") || n.includes("gfr") || n.includes("bun") || n.includes("potassium") || n.includes("sodium")) {
     return { name: "Renal & Electrolytes", color: "#1D4ED8", bg: "#DBEAFE", icon: Activity };
   }
-  if (n.includes("wbc") || n.includes("white blood") || n.includes("platelet") || n.includes("hemoglobin") || n.includes("rbc")) {
+  if (n.includes("wbc") || n.includes("white blood") || n.includes("platelet") || n.includes("hemoglobin") || n.includes("rbc") || n.includes("ferritin")) {
     return { name: "Hematology", color: "#BE123C", bg: "#FFE4E6", icon: Dna };
   }
   if (n.includes("ast") || n.includes("alt") || n.includes("bilirubin") || n.includes("albumin")) {
@@ -261,6 +263,7 @@ function RangeGauge({ value, min, max, unit }) {
 function TrendChart({ points, title, unit }) {
   const chartId = useMemo(() => `trend-grad-${title.replace(/[^a-zA-Z0-9]/g, "")}-${uid()}`, [title]);
   if (!points || points.length < 2) return null;
+
   const width = 460;
   const height = 135;
   const padding = { top: 22, right: 35, bottom: 25, left: 45 };
@@ -284,8 +287,6 @@ function TrendChart({ points, title, unit }) {
   const getY = (val) => padding.top + chartH - ((val - minBound) / (maxBound - minBound)) * chartH;
 
   const lineCoords = points.map((p, i) => `${getX(i)},${getY(p.value)}`).join(" ");
-
-  // Closed area polygon for smooth gradient fill
   const areaCoords = `${getX(0)},${padding.top + chartH} ${lineCoords} ${getX(points.length - 1)},${padding.top + chartH}`;
 
   const firstPt = points[0];
@@ -294,7 +295,6 @@ function TrendChart({ points, title, unit }) {
   const pctDelta = firstPt.value !== 0 ? ((delta / firstPt.value) * 100).toFixed(1) : 0;
   const deltaSign = delta > 0 ? "+" : "";
 
-  // Trajectory Assessment (e.g. A1c/Glucose decreasing is positive improvement)
   let trajectoryLabel = "Stable";
   let trajectoryColor = C.inkSoft;
   let trajectoryBg = C.unknownSoft;
@@ -318,7 +318,6 @@ function TrendChart({ points, title, unit }) {
     }
   }
 
-  // Ref range polygon if available
   let refBandY1 = null;
   let refBandY2 = null;
   if (commonRefMin != null && commonRefMax != null) {
@@ -500,8 +499,210 @@ function NavItem({ icon: Icon, label, active, badge, onClick }) {
   );
 }
 
+/* ---------------- Biomarker Explainer ("Clinical Context") Modal ---------------- */
+function BiomarkerExplainerModal({ biomarkerName, onClose }) {
+  if (!biomarkerName) return null;
+  const info = lookupBiomarkerInfo(biomarkerName);
+
+  function copyQuestions() {
+    const text = info.doctorQuestions.map((q, i) => `${i + 1}. ${q}`).join("\n");
+    navigator.clipboard.writeText(text);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+      <div className="w-full max-w-lg p-6 rounded-2xl shadow-2xl bg-white border max-h-[90vh] overflow-y-auto" style={{ borderColor: C.hairline }}>
+        <div className="flex items-start justify-between pb-3 border-b" style={{ borderColor: C.hairline }}>
+          <div>
+            <div className="flex items-center gap-2">
+              <span style={{ ...serif, fontSize: 20, fontWeight: 700 }}>{info.name}</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase" style={{ background: C.accentSoft, color: C.accent }}>
+                {info.category}
+              </span>
+            </div>
+            <div className="text-xs text-gray-500 font-medium mt-0.5">Primary System: {info.organ}</div>
+          </div>
+          <button onClick={onClose} className="p-1 rounded-full text-gray-400 hover:text-gray-600">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="py-4 space-y-4 text-sm">
+          <div>
+            <h4 className="text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">What It Measures</h4>
+            <p className="text-gray-600 text-xs leading-relaxed">{info.description}</p>
+          </div>
+
+          <div>
+            <h4 className="text-xs font-bold uppercase tracking-wider text-gray-700 mb-1">Clinical Significance</h4>
+            <p className="text-gray-600 text-xs leading-relaxed">{info.clinicalSignificance}</p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 pt-1">
+            <div className="p-3 rounded-xl bg-orange-50 border border-orange-200">
+              <span className="text-[10px] font-bold uppercase text-orange-900 block mb-0.5">If Result is High</span>
+              <p className="text-xs text-orange-800 leading-relaxed">{info.interpretation.high}</p>
+            </div>
+            <div className="p-3 rounded-xl bg-blue-50 border border-blue-200">
+              <span className="text-[10px] font-bold uppercase text-blue-900 block mb-0.5">If Result is Low</span>
+              <p className="text-xs text-blue-800 leading-relaxed">{info.interpretation.low}</p>
+            </div>
+          </div>
+
+          <div className="p-4 rounded-xl border bg-gray-50/70" style={{ borderColor: C.hairline }}>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-gray-700">
+                Questions for Your Doctor
+              </span>
+              <button
+                onClick={copyQuestions}
+                className="flex items-center gap-1 text-[11px] font-semibold text-teal-700 hover:underline"
+              >
+                <Copy size={12} /> Copy Prompts
+              </button>
+            </div>
+            <ul className="list-disc ml-4 space-y-1.5 text-xs text-gray-700">
+              {info.doctorQuestions.map((q, i) => (
+                <li key={i}>{q}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        <div className="pt-2 text-right">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-xs font-bold rounded-lg text-white"
+            style={{ background: C.accent }}
+          >
+            Close Explainer
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Scenario Switcher Modal ---------------- */
+function ScenarioSwitcherModal({ isOpen, onClose, onSelectScenario, onResetBlank }) {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+      <div className="w-full max-w-xl p-6 rounded-2xl shadow-2xl bg-white border" style={{ borderColor: C.hairline }}>
+        <div className="flex items-center justify-between pb-3 border-b mb-4" style={{ borderColor: C.hairline }}>
+          <div>
+            <h3 style={{ ...serif, fontSize: 20, fontWeight: 700 }}>Clinical Scenario Switcher</h3>
+            <p className="text-xs text-gray-500 mt-0.5">Switch between real-world patient personas to test clinical flows.</p>
+          </div>
+          <button onClick={onClose} className="p-1 rounded-full text-gray-400 hover:text-gray-600"><X size={18} /></button>
+        </div>
+
+        <div className="space-y-3">
+          {SCENARIOS.map((sc) => (
+            <div
+              key={sc.id}
+              onClick={() => {
+                onSelectScenario(sc);
+                onClose();
+              }}
+              className="p-4 rounded-xl border cursor-pointer transition-all hover:border-teal-700 hover:bg-teal-50/20 group"
+              style={{ borderColor: C.hairline }}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-bold text-sm text-gray-900 group-hover:text-teal-800">{sc.label}</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase" style={{ background: C.accentSoft, color: C.accent }}>
+                  {sc.specialty}
+                </span>
+              </div>
+              <p className="text-xs text-gray-600 leading-relaxed">{sc.summaryDesc}</p>
+              <div className="mt-2 text-[11px] font-semibold text-teal-700 flex items-center gap-1">
+                Load {sc.patient.name}&rsquo;s records <ChevronRight size={12} />
+              </div>
+            </div>
+          ))}
+
+          <div
+            onClick={() => {
+              onResetBlank();
+              onClose();
+            }}
+            className="p-3 rounded-xl border border-dashed text-center cursor-pointer hover:bg-gray-50 text-xs font-semibold text-gray-600"
+            style={{ borderColor: C.hairline }}
+          >
+            Start with Blank Slate (Manual Intake & OCR Upload)
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Patient Portal Message Drafter Modal ---------------- */
+function PortalMessageModal({ isOpen, onClose, patient, reports }) {
+  if (!isOpen) return null;
+
+  const outOfRangeTests = reports.flatMap((r) =>
+    r.tests.filter((t) => ["low", "high"].includes(computeStatus(t)))
+  );
+
+  const draftMessage = `Dear Care Team,
+
+I am reviewing my recent laboratory results organized in MedLens and wanted to check in regarding a few biomarker values:
+
+${outOfRangeTests.slice(0, 5).map((t) => `• ${t.name}: ${t.value} ${t.unit || ""} (Standard target: ${t.referenceRangeText || "N/A"})`).join("\n")}
+
+A few questions for our next review:
+1. Do these numbers align with our current medication and lifestyle plan?
+2. Are there any dosage adjustments you would recommend at this stage?
+3. When should we schedule my next repeat lab panel?
+
+Thank you,
+${patient.name || "Patient"}
+${patient.conditions ? `Documented History: ${patient.conditions}` : ""}`;
+
+  function handleCopy() {
+    navigator.clipboard.writeText(draftMessage);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+      <div className="w-full max-w-lg p-6 rounded-2xl shadow-2xl bg-white border" style={{ borderColor: C.hairline }}>
+        <div className="flex items-center justify-between pb-3 border-b mb-3" style={{ borderColor: C.hairline }}>
+          <div className="flex items-center gap-2">
+            <Send size={18} style={{ color: C.accent }} />
+            <h3 style={{ ...serif, fontSize: 19, fontWeight: 700 }}>Patient Portal Message Drafter</h3>
+          </div>
+          <button onClick={onClose} className="p-1 rounded-full text-gray-400 hover:text-gray-600"><X size={16} /></button>
+        </div>
+        <p className="text-xs text-gray-500 mb-3">
+          Pre-formatted message structured for MyChart, Epic, Cerner, or AthenaHealth patient portals.
+        </p>
+        <textarea
+          readOnly
+          value={draftMessage}
+          rows={11}
+          className="w-full p-3 rounded-xl text-xs font-mono border leading-relaxed bg-gray-50"
+          style={{ borderColor: C.hairline }}
+        />
+        <div className="flex items-center justify-between pt-3">
+          <span className="text-[11px] text-gray-400">Ready to paste into your portal</span>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="px-3 py-1.5 rounded-lg border text-xs font-semibold" style={{ borderColor: C.hairline }}>
+              Close
+            </button>
+            <button onClick={handleCopy} className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-bold text-white shadow-xs" style={{ background: C.accent }}>
+              <Copy size={13} /> Copy Message
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- Editable Test Row ---------------- */
-function TestRow({ test, onSave, onDelete }) {
+function TestRow({ test, onSave, onDelete, onOpenExplainer }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(test);
   const status = computeStatus(test);
@@ -587,7 +788,14 @@ function TestRow({ test, onSave, onDelete }) {
       {/* Test Name & Category Pill */}
       <div className="sm:col-span-4">
         <div className="flex items-center gap-2 flex-wrap">
-          <span style={{ fontWeight: 700, color: C.ink, fontSize: 14.5 }}>{test.name}</span>
+          <button
+            onClick={() => onOpenExplainer(test.name)}
+            className="text-left font-bold text-gray-900 hover:text-teal-800 transition-colors flex items-center gap-1 group"
+            title="Click for clinical explanation & questions for your doctor"
+          >
+            <span style={{ fontSize: 14.5 }}>{test.name}</span>
+            <HelpCircle size={13} className="text-gray-400 group-hover:text-teal-700 transition-colors" />
+          </button>
           <span
             className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider"
             style={{ background: category.bg, color: category.color }}
@@ -717,7 +925,7 @@ function AddTestModal({ isOpen, onClose, onAdd }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-fadeIn">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
       <div className="w-full max-w-md p-6 rounded-2xl shadow-2xl bg-white border" style={{ borderColor: C.hairline }}>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
@@ -751,7 +959,7 @@ function AddTestModal({ isOpen, onClose, onAdd }) {
           </label>
           <div className="flex justify-end gap-2.5 pt-3">
             <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded-lg border font-medium hover:bg-gray-50" style={{ borderColor: C.hairline }}>Cancel</button>
-            <button type="submit" className="px-5 py-2 text-sm rounded-lg font-bold text-white shadow-sm transition-transform active:scale-95" style={{ background: C.accent }}>Add to Report</button>
+            <button type="submit" className="px-5 py-2 text-sm rounded-lg font-bold text-white shadow-sm" style={{ background: C.accent }}>Add to Report</button>
           </div>
         </form>
       </div>
@@ -835,10 +1043,16 @@ export default function MedLens() {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedReportFilter, setSelectedReportFilter] = useState("all");
-  const [sortBy, setSortBy] = useState("severity"); // "severity" | "name_asc" | "name_desc"
+  const [sortBy, setSortBy] = useState("severity");
 
-  // Modal for manual test entry
+  // History Tab View Mode ("charts" vs "flowsheet")
+  const [historyViewMode, setHistoryViewMode] = useState("charts");
+
+  // Active Modals
   const [activeReportIdForAdd, setActiveReportIdForAdd] = useState(null);
+  const [explainingBiomarker, setExplainingBiomarker] = useState(null);
+  const [isScenarioModalOpen, setIsScenarioModalOpen] = useState(false);
+  const [isPortalModalOpen, setIsPortalModalOpen] = useState(false);
 
   const fileInputRef = useRef(null);
 
@@ -911,14 +1125,18 @@ export default function MedLens() {
     }
   }, [patient, reports, summary, auditLog, loaded, persist, user]);
 
-  /* Load sample demo scenario */
-  function loadSampleData() {
-    setPatient(SAMPLE_PATIENT);
-    setReports(SAMPLE_REPORTS);
-    setSummary(SAMPLE_SUMMARY);
-    setAuditLog(SAMPLE_AUDIT_LOG);
+  /* Load specific scenario */
+  function loadScenario(scenario) {
+    setPatient(scenario.patient);
+    setReports(scenario.reports);
+    setSummary(scenario.summary);
+    setAuditLog(scenario.auditLog);
     setTab("record");
-    showToast("Loaded Eleanor Vance demo record", "success");
+    showToast(`Loaded scenario: ${scenario.patient.name}`, "success");
+  }
+
+  function loadSampleData() {
+    loadScenario(SCENARIOS[0]);
   }
 
   function insertSampleReportText() {
@@ -1199,6 +1417,38 @@ export default function MedLens() {
     return Object.entries(byName).filter(([, v]) => v.length > 1);
   }, [reports]);
 
+  /* EHR Flow Sheet Matrix Data (Biomarker rows x Chronological report columns) */
+  const flowSheetData = useMemo(() => {
+    const sortedReports = [...reports].sort((a, b) => (a.date > b.date ? 1 : -1));
+    const dates = sortedReports.map((r) => ({ id: r.id, date: r.date, title: r.title }));
+
+    // Group tests by test name
+    const matrixMap = {};
+    sortedReports.forEach((r) => {
+      r.tests.forEach((t) => {
+        if (!matrixMap[t.name]) {
+          matrixMap[t.name] = {
+            name: t.name,
+            unit: t.unit,
+            referenceRangeText: t.referenceRangeText,
+            category: getBiomarkerCategory(t.name),
+            valuesByReportId: {},
+          };
+        }
+        matrixMap[t.name].valuesByReportId[r.id] = {
+          value: t.value,
+          numericValue: t.numericValue,
+          status: computeStatus(t),
+        };
+      });
+    });
+
+    return {
+      dates,
+      rows: Object.values(matrixMap).sort((a, b) => a.name.localeCompare(b.name)),
+    };
+  }, [reports]);
+
   /* Clinical summary generator */
   async function generateSummary() {
     setSummaryBusy(true);
@@ -1343,8 +1593,7 @@ export default function MedLens() {
     showToast("Downloaded CSV table", "success");
   }
 
-  function clearRecord() {
-    if (!window.confirm("Clear this clinical record? All entries will be reset.")) return;
+  function resetBlank() {
     localStorage.removeItem("medlens-record");
     setPatient({ name: "", age: "", sex: "", symptoms: "", conditions: "", allergies: "", medications: "", notes: "" });
     setReports([]);
@@ -1354,7 +1603,7 @@ export default function MedLens() {
     setAuditLog([]);
     setErr(null);
     setTab("intake");
-    showToast("Record reset", "info");
+    showToast("Started blank record", "info");
   }
 
   if (cloudPersistenceEnabled && !user && loaded) {
@@ -1385,7 +1634,6 @@ export default function MedLens() {
     0
   );
 
-  // Patient Initials for Avatar
   const patientInitials = patient.name
     ? patient.name
         .split(" ")
@@ -1519,12 +1767,12 @@ export default function MedLens() {
                   className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider"
                   style={{ background: C.accentSoft, color: C.accent }}
                 >
-                  Clinical v2.0
+                  Clinical Intelligence v2.0
                 </span>
               </div>
               <div className="text-xs flex items-center gap-1.5" style={{ color: C.inkSoft }}>
                 <span style={{ width: 6, height: 6, borderRadius: 999, background: C.normal, display: "inline-block" }} />
-                <span>Clinical Intelligence Ledger</span>
+                <span>Patient-Facing Clinical Ledger</span>
               </div>
             </div>
           </div>
@@ -1532,10 +1780,10 @@ export default function MedLens() {
           {/* Active Patient Pill in Header */}
           {patient.name && (
             <div
-              onClick={() => setTab("intake")}
-              className="hidden md:flex items-center gap-2.5 px-3 py-1.5 rounded-xl border cursor-pointer hover:border-teal-700/50 transition-all"
-              style={{ background: C.page, borderColor: C.hairline }}
-              title="Click to view or edit patient intake"
+              onClick={() => setIsScenarioModalOpen(true)}
+              className="hidden md:flex items-center gap-2.5 px-3 py-1.5 rounded-xl border cursor-pointer hover:border-teal-700/50 transition-all bg-white"
+              style={{ borderColor: C.hairline }}
+              title="Click to switch clinical scenario"
             >
               <div
                 className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-xs"
@@ -1547,31 +1795,21 @@ export default function MedLens() {
                 <span className="font-bold" style={{ color: C.ink }}>{patient.name}</span>
                 <span className="ml-1.5 text-gray-500 font-medium">{patient.age ? `${patient.age}y` : ""} {patient.sex || ""}</span>
               </div>
+              <ChevronRight size={13} className="text-gray-400" />
             </div>
           )}
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
-          {/* Quick Demo Switcher */}
-          {reports.length === 0 && !patient.name ? (
-            <button
-              onClick={loadSampleData}
-              className="flex items-center gap-1.5 text-xs font-bold px-3.5 py-1.5 rounded-lg shadow-sm transition-all hover:opacity-95"
-              style={{ background: C.accent, color: "#FFFFFF" }}
-              title="Load full demo patient scenario"
-            >
-              <Sparkles size={14} /> Load Demo Record
-            </button>
-          ) : (
-            <button
-              onClick={loadSampleData}
-              className="hidden lg:flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg border hover:bg-gray-50 transition-colors"
-              style={{ borderColor: C.hairline, color: C.accent }}
-              title="Reload Eleanor Vance sample data"
-            >
-              <Sparkles size={13} /> Demo Preset
-            </button>
-          )}
+          {/* Clinical Scenario Switcher Button */}
+          <button
+            onClick={() => setIsScenarioModalOpen(true)}
+            className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg border hover:bg-gray-50 transition-colors"
+            style={{ borderColor: C.hairline, color: C.accent }}
+            title="Switch between clinical personas"
+          >
+            <Sparkles size={14} /> Switch Scenario
+          </button>
 
           {/* Export Action Hub */}
           <div className="flex items-center gap-1 rounded-lg p-1 border shadow-2xs" style={{ borderColor: C.hairline, background: C.page }}>
@@ -1614,9 +1852,9 @@ export default function MedLens() {
           </div>
 
           <button
-            onClick={clearRecord}
+            onClick={resetBlank}
             disabled={!patient.name && reports.length === 0}
-            title="Reset active record"
+            title="Reset active record to blank"
             className="p-1.5 rounded-lg border hover:bg-red-50 transition-colors disabled:opacity-30"
             style={{ borderColor: C.hairline, color: C.high }}
           >
@@ -1745,15 +1983,13 @@ export default function MedLens() {
                     Demographics, medical history, and current medications recorded strictly as patient-reported.
                   </p>
                 </div>
-                {reports.length === 0 && !patient.name && (
-                  <button
-                    onClick={loadSampleData}
-                    className="flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-lg transition-all shadow-xs"
-                    style={{ background: C.accentSoft, color: C.accent }}
-                  >
-                    <Sparkles size={14} /> Preload Sample Patient
-                  </button>
-                )}
+                <button
+                  onClick={() => setIsScenarioModalOpen(true)}
+                  className="flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-lg transition-all shadow-xs"
+                  style={{ background: C.accentSoft, color: C.accent }}
+                >
+                  <Sparkles size={14} /> Clinical Scenarios
+                </button>
               </div>
 
               <div className="p-6 rounded-2xl border shadow-xs space-y-5" style={{ background: C.panel, borderColor: C.hairline }}>
@@ -1917,7 +2153,7 @@ export default function MedLens() {
                 <div>
                   <h2 style={{ ...serif, fontSize: 24, fontWeight: 700 }}>Structured Health Record</h2>
                   <p className="text-sm mt-0.5" style={{ color: C.inkSoft }}>
-                    Extracted biomarkers organized by clinical report with calibrated range gauges.
+                    Extracted biomarkers organized by clinical report with calibrated range gauges. Click any biomarker name for clinical explanation.
                   </p>
                 </div>
               </div>
@@ -1960,7 +2196,7 @@ export default function MedLens() {
                       <Pencil size={15} className="text-amber-600" />
                     </div>
                     <div className="text-2xl font-extrabold text-amber-700">{unverifiedCount}</div>
-                    <div className="text-[11px] text-gray-400 mt-0.5">{unverifiedCount === 0 ? "All values verified" : "Pending clinician review"}</div>
+                    <div className="text-[11px] text-gray-400 mt-0.5">{unverifiedCount === 0 ? "All values verified" : "Pending review"}</div>
                   </div>
                 </div>
               )}
@@ -2053,7 +2289,7 @@ export default function MedLens() {
                   </div>
                   <div style={{ ...serif, fontSize: 19, fontWeight: 700 }}>No Lab Reports On File</div>
                   <p className="text-xs mt-1.5 mb-5 max-w-md mx-auto text-gray-500">
-                    Ingest your first clinical lab report or load our complete demo record to explore structured biomarkers and visual gauges.
+                    Ingest your first clinical lab report or select a pre-configured clinical scenario to explore structured biomarkers and visual gauges.
                   </p>
                   <div className="flex items-center justify-center gap-3">
                     <button
@@ -2064,11 +2300,11 @@ export default function MedLens() {
                       Ingest Medical Report
                     </button>
                     <button
-                      onClick={loadSampleData}
+                      onClick={() => setIsScenarioModalOpen(true)}
                       className="px-4 py-2 rounded-xl text-xs font-semibold border hover:bg-gray-50"
                       style={{ borderColor: C.hairline }}
                     >
-                      Load Demo Record
+                      Browse Scenarios
                     </button>
                   </div>
                 </div>
@@ -2093,7 +2329,6 @@ export default function MedLens() {
                       return true;
                     });
 
-                    // Sort tests
                     filteredTests = [...filteredTests].sort((a, b) => {
                       if (sortBy === "severity") {
                         const scoreA = ["high", "low"].includes(computeStatus(a)) ? 2 : 1;
@@ -2121,7 +2356,7 @@ export default function MedLens() {
                                 </span>
                               </div>
                               <div className="text-xs text-gray-500 mt-0.5">
-                                Specimen collected on {r.date} · {r.tests.length} test markers
+                                Specimen collection {r.date} · {r.tests.length} biomarkers
                               </div>
                             </div>
                           </div>
@@ -2157,7 +2392,7 @@ export default function MedLens() {
                           {/* Original Document Source */}
                           <div className="lg:col-span-4 p-4 max-h-96 overflow-auto" style={{ background: "#FDFCF9" }}>
                             <div className="text-[11px] font-bold uppercase tracking-wider mb-2 text-gray-500">
-                              Document Text Source
+                              Document Source Text
                             </div>
                             <pre className="whitespace-pre-wrap text-[11px] leading-relaxed select-text" style={{ ...mono, color: C.inkSoft }}>
                               {r.rawText || "No source text available."}
@@ -2177,6 +2412,7 @@ export default function MedLens() {
                                   test={t}
                                   onSave={(patch) => updateTest(r.id, t.id, patch)}
                                   onDelete={() => deleteTest(r.id, t.id)}
+                                  onOpenExplainer={(name) => setExplainingBiomarker(name)}
                                 />
                               ))
                             )}
@@ -2194,11 +2430,20 @@ export default function MedLens() {
             <section className="space-y-6">
               <div className="flex items-start justify-between">
                 <div>
-                  <h2 style={{ ...serif, fontSize: 24, fontWeight: 700 }}>Clinical Synthesis & Summary</h2>
+                  <h2 style={{ ...serif, fontSize: 24, fontWeight: 700 }}>Clinical Synthesis & Patient Summary</h2>
                   <p className="text-sm mt-1" style={{ color: C.inkSoft }}>
-                    Plain-language clinical digest explaining lab findings and trends without medical diagnoses.
+                    Plain-language overview synthesizing lab findings, clinical context, and medication adherence.
                   </p>
                 </div>
+                <button
+                  onClick={() => setIsPortalModalOpen(true)}
+                  disabled={reports.length === 0}
+                  className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg border hover:bg-gray-50 transition-colors disabled:opacity-40"
+                  style={{ borderColor: C.hairline, color: C.accent }}
+                  title="Generate a message for your doctor via MyChart/Epic/Cerner"
+                >
+                  <Send size={13} /> Message My Doctor
+                </button>
               </div>
 
               <div className="p-6 rounded-2xl border shadow-xs space-y-4 bg-white" style={{ borderColor: C.hairline }}>
@@ -2214,16 +2459,24 @@ export default function MedLens() {
                   </button>
 
                   {summary && (
-                    <button
-                      onClick={() => {
-                        navigator.clipboard.writeText(summary);
-                        showToast("Summary copied to clipboard", "success");
-                      }}
-                      className="text-xs font-semibold px-3 py-1.5 rounded-lg border hover:bg-gray-50 transition-colors"
-                      style={{ borderColor: C.hairline }}
-                    >
-                      Copy to Clipboard
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(summary);
+                          showToast("Summary copied to clipboard", "success");
+                        }}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-lg border hover:bg-gray-50 transition-colors"
+                        style={{ borderColor: C.hairline }}
+                      >
+                        Copy Summary
+                      </button>
+                      <button
+                        onClick={() => setIsPortalModalOpen(true)}
+                        className="text-xs font-bold px-3 py-1.5 rounded-lg text-teal-700 bg-teal-50 border border-teal-200 hover:bg-teal-100 transition-colors"
+                      >
+                        Draft Portal Note
+                      </button>
+                    </div>
                   )}
                 </div>
 
@@ -2248,11 +2501,31 @@ export default function MedLens() {
           {/* ================= TAB: History & Trends ================= */}
           {tab === "history" && (
             <section className="space-y-6">
-              <div>
-                <h2 style={{ ...serif, fontSize: 24, fontWeight: 700 }}>Longitudinal Trendline Studio</h2>
-                <p className="text-sm mt-1" style={{ color: C.inkSoft }}>
-                  Biomarkers measured over time, plotted with shaded reference bands to visualize physiological trajectories.
-                </p>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 style={{ ...serif, fontSize: 24, fontWeight: 700 }}>Longitudinal Trendline Studio</h2>
+                  <p className="text-sm mt-1" style={{ color: C.inkSoft }}>
+                    Biomarkers tracked over time. View interactive SVG charts or the EHR-style flow sheet matrix.
+                  </p>
+                </div>
+
+                {/* View Switcher: Charts vs Flow Sheet */}
+                <div className="flex items-center p-1 rounded-xl border bg-white shadow-2xs text-xs font-bold" style={{ borderColor: C.hairline }}>
+                  <button
+                    onClick={() => setHistoryViewMode("charts")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors ${historyViewMode === "charts" ? "text-white" : "text-gray-600 hover:bg-gray-100"}`}
+                    style={{ background: historyViewMode === "charts" ? C.accent : "transparent" }}
+                  >
+                    <Activity size={14} /> Trendline Charts
+                  </button>
+                  <button
+                    onClick={() => setHistoryViewMode("flowsheet")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors ${historyViewMode === "flowsheet" ? "text-white" : "text-gray-600 hover:bg-gray-100"}`}
+                    style={{ background: historyViewMode === "flowsheet" ? C.accent : "transparent" }}
+                  >
+                    <Table size={14} /> EHR Flow Sheet Matrix
+                  </button>
+                </div>
               </div>
 
               {trends.length === 0 ? (
@@ -2268,7 +2541,8 @@ export default function MedLens() {
                     Load Demo Record with Sequential Labs
                   </button>
                 </div>
-              ) : (
+              ) : historyViewMode === "charts" ? (
+                /* Visual Area Charts */
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {trends.map(([name, points]) => (
                     <TrendChart
@@ -2278,6 +2552,100 @@ export default function MedLens() {
                       unit={points[0]?.unit}
                     />
                   ))}
+                </div>
+              ) : (
+                /* EHR Flow Sheet Matrix View */
+                <div className="p-6 rounded-2xl border shadow-xs bg-white overflow-hidden" style={{ borderColor: C.hairline }}>
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 style={{ ...serif, fontSize: 18, fontWeight: 700 }}>EHR Flow Sheet Matrix</h3>
+                      <p className="text-xs text-gray-500">Side-by-side chronological comparison of biomarkers across lab dates.</p>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs text-left border-collapse">
+                      <thead>
+                        <tr className="border-b bg-gray-50/70" style={{ borderColor: C.hairline }}>
+                          <th className="p-3 font-bold text-gray-700">Biomarker</th>
+                          <th className="p-3 font-bold text-gray-700">Category</th>
+                          <th className="p-3 font-bold text-gray-700">Standard Target</th>
+                          {flowSheetData.dates.map((d) => (
+                            <th key={d.id} className="p-3 font-bold text-teal-800">
+                              {d.date}
+                            </th>
+                          ))}
+                          <th className="p-3 font-bold text-gray-700 text-right">Net Shift</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y" style={{ borderColor: C.hairline }}>
+                        {flowSheetData.rows.map((row) => {
+                          const validEntries = flowSheetData.dates
+                            .map((d) => row.valuesByReportId[d.id])
+                            .filter((v) => v && v.numericValue != null);
+
+                          let shiftBadge = null;
+                          if (validEntries.length >= 2) {
+                            const first = validEntries[0].numericValue;
+                            const last = validEntries[validEntries.length - 1].numericValue;
+                            const diff = last - first;
+                            const pct = first !== 0 ? ((diff / first) * 100).toFixed(1) : 0;
+                            const sign = diff > 0 ? "+" : "";
+
+                            shiftBadge = (
+                              <span
+                                className="px-2 py-0.5 rounded font-bold text-[11px]"
+                                style={{
+                                  background: diff === 0 ? C.unknownSoft : diff < 0 ? C.normalSoft : C.highSoft,
+                                  color: diff === 0 ? C.inkSoft : diff < 0 ? C.normal : C.high,
+                                }}
+                              >
+                                {sign}{diff.toFixed(1)} ({sign}{pct}%)
+                              </span>
+                            );
+                          }
+
+                          return (
+                            <tr key={row.name} className="hover:bg-gray-50/50">
+                              <td className="p-3 font-bold text-gray-900 flex items-center gap-1.5">
+                                <button
+                                  onClick={() => setExplainingBiomarker(row.name)}
+                                  className="hover:text-teal-800 transition-colors flex items-center gap-1 text-left"
+                                >
+                                  {row.name}
+                                  <HelpCircle size={12} className="text-gray-400" />
+                                </button>
+                              </td>
+                              <td className="p-3 text-gray-500">
+                                <span className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase" style={{ background: row.category.bg, color: row.category.color }}>
+                                  {row.category.name}
+                                </span>
+                              </td>
+                              <td className="p-3 text-gray-500 font-medium">
+                                {row.referenceRangeText || "—"}
+                              </td>
+                              {flowSheetData.dates.map((d) => {
+                                const entry = row.valuesByReportId[d.id];
+                                if (!entry) return <td key={d.id} className="p-3 text-gray-300">—</td>;
+                                const meta = STATUS_META[entry.status] || STATUS_META.normal;
+                                return (
+                                  <td key={d.id} className="p-3">
+                                    <span
+                                      className="px-2 py-0.5 rounded text-xs font-bold"
+                                      style={{ ...mono, background: meta.bg, color: meta.color }}
+                                    >
+                                      {entry.value} {row.unit || ""}
+                                    </span>
+                                  </td>
+                                );
+                              })}
+                              <td className="p-3 text-right">{shiftBadge || <span className="text-gray-400">—</span>}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
 
@@ -2338,6 +2706,29 @@ export default function MedLens() {
         isOpen={Boolean(activeReportIdForAdd)}
         onClose={() => setActiveReportIdForAdd(null)}
         onAdd={handleAddManualTest}
+      />
+
+      {/* Biomarker Explainer Modal */}
+      <BiomarkerExplainerModal
+        biomarkerName={explainingBiomarker}
+        onClose={() => setExplainingBiomarker(null)}
+      />
+
+      {/* Scenario Switcher Modal */}
+      <ScenarioSwitcherModal
+        isOpen={isScenarioModalOpen}
+        onClose={() => setIsScenarioModalOpen(false)}
+        onSelectScenario={loadScenario}
+        onResetBlank={resetBlank}
+      />
+
+      {/* Patient Portal Message Drafter Modal */}
+      <PortalMessageModal
+        isOpen={isPortalModalOpen}
+        onClose={() => setIsPortalModalOpen(false)}
+        patient={patient}
+        reports={reports}
+        summary={summary}
       />
 
       {/* Toast Notification */}
