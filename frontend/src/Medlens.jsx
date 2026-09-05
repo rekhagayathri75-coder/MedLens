@@ -39,7 +39,8 @@ const todayStr = () => new Date().toISOString().slice(0, 10);
 
 /* ---------------- API helpers ---------------- */
 async function callClaude(system, userText) {
-  const res = await fetch("http://localhost:3001/api/claude", {
+  const apiBase = import.meta.env.VITE_API_URL || "http://localhost:3001";
+  const res = await fetch(`${apiBase}/api/claude`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
