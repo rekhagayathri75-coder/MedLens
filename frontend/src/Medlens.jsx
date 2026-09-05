@@ -362,6 +362,28 @@ export default function MedLens() {
     URL.revokeObjectURL(url);
   }
 
+  function exportJsonRecord() {
+    const blob = new Blob([JSON.stringify({ patient, reports, summary }, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = (patient.name ? patient.name.replace(/\s+/g, "_") : "medlens") + "_record.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function clearRecord() {
+    if (!window.confirm("Clear this local record? This cannot be undone.")) return;
+    localStorage.removeItem("medlens-record");
+    setPatient({ name: "", age: "", sex: "", symptoms: "", conditions: "", allergies: "", medications: "", notes: "" });
+    setReports([]);
+    setSummary("");
+    setDraftText("");
+    setDraftTitle("");
+    setErr(null);
+    setTab("intake");
+  }
+
   const totalTests = reports.reduce((n, r) => n + r.tests.length, 0);
   const outOfRange = reports.reduce((n, r) => n + r.tests.filter((t) => ["low", "high"].includes(computeStatus(t))).length, 0);
 
@@ -374,19 +396,25 @@ export default function MedLens() {
       `}</style>
 
       {/* header */}
-      <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: `1px solid ${C.hairline}` }}>
+      <div className="flex items-center justify-between gap-4 px-6 py-4" style={{ borderBottom: `1px solid ${C.hairline}` }}>
         <div>
           <div style={{ ...serif, fontSize: 22, fontWeight: 700, letterSpacing: "-0.01em" }}>MedLens</div>
-          <div className="text-xs" style={{ color: C.inkSoft }}>Clinical information, organized — not a diagnosis</div>
+          <div className="flex items-center gap-2 text-xs" style={{ color: C.inkSoft }}>
+            <span style={{ width: 6, height: 6, borderRadius: 999, background: C.normal, display: "inline-block" }} />
+            Saved locally · clinical information, organized — not a diagnosis
+          </div>
         </div>
-        <button
-          onClick={exportRecord}
-          disabled={!patient.name && reports.length === 0}
-          className="flex items-center gap-2 text-sm px-3 py-2 rounded"
-          style={{ border: `1px solid ${C.hairline}`, color: C.ink, background: C.panel }}
-        >
-          <Download size={15} /> Export record
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={exportJsonRecord} disabled={!patient.name && reports.length === 0} title="Download a portable JSON copy" className="flex items-center gap-2 text-sm px-3 py-2 rounded" style={{ border: `1px solid ${C.hairline}`, color: C.ink, background: C.panel, opacity: !patient.name && reports.length === 0 ? 0.5 : 1 }}>
+            <Download size={15} /> JSON
+          </button>
+          <button onClick={exportRecord} disabled={!patient.name && reports.length === 0} className="flex items-center gap-2 text-sm px-3 py-2 rounded" style={{ border: `1px solid ${C.hairline}`, color: C.ink, background: C.panel, opacity: !patient.name && reports.length === 0 ? 0.5 : 1 }}>
+            <Download size={15} /> Export
+          </button>
+          <button onClick={clearRecord} disabled={!patient.name && reports.length === 0} title="Clear this local record" className="p-2 rounded" style={{ border: `1px solid ${C.hairline}`, color: C.high, background: C.panel, opacity: !patient.name && reports.length === 0 ? 0.5 : 1 }}>
+            <Trash2 size={15} />
+          </button>
+        </div>
       </div>
 
       <div className="flex" style={{ minHeight: 560 }}>
