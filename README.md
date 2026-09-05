@@ -5,6 +5,15 @@ MedLens is organized as two applications:
 - `frontend/` contains the React and Vite client.
 - `backend/` contains the Node.js API server and Vercel functions.
 
+### Features
+- **Visual Reference Range Gauges**: Color-coded boundary bars with marker pins for low, normal, and high intervals.
+- **Interactive Longitudinal SVG Trend Charts**: Shaded reference bands, tooltips, and shift metrics across dates.
+- **Resilient Multi-Mode Extraction**: Claude 3.5 Haiku API proxy with automatic client-side heuristic regex fallback.
+- **In-Browser OCR & Document Ingestion**: PDF.js and Tesseract OCR with drag-and-drop document upload.
+- **Multi-Format Clinical Exports**: Print-ready Clinician Consultation Sheet (`window.print()`), CSV table, JSON, and text.
+- **Drug-Allergy & Safety Alerts**: Detects medication/allergy overlaps and critical lab value thresholds.
+- **Sample Clinical Scenario**: One-click demo patient data loader for instant testing.
+
 ## Development
 
 Install frontend dependencies:
