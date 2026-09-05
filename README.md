@@ -1,9 +1,27 @@
-# React + Vite
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+# MedLens
 
-Currently, two official plugins are available:
+MedLens is organized as two applications:
+- `frontend/` contains the React and Vite client.
+- `backend/` contains the Node.js API server.
 
+## Development
+
+Install frontend dependencies from the project root:
+
+```bash
+npm install --prefix frontend
+```
+
+Run the frontend:
+npm run dev:frontend
+```
+
+Run the backend in a second terminal:
+
+```bash
+npm run dev:backend
+```
 - [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
 - [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
 

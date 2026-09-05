@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import {
-  User, FileText, ClipboardList, MessageSquare, Clock, Plus, Pencil,
+  User, FileText, ClipboardList, MessageSquare, Clock, Pencil,
   Check, X, Download, AlertTriangle, Loader2, ArrowUp, ArrowDown, Minus,
   Trash2, ShieldAlert, Sparkles, ChevronRight
 } from "lucide-react";
@@ -167,6 +167,7 @@ export default function MedLens() {
   const [summaryBusy, setSummaryBusy] = useState(false);
 
   /* load persisted record (browser localStorage) */
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     try {
       const raw = localStorage.getItem("medlens-record");
@@ -175,12 +176,13 @@ export default function MedLens() {
         if (parsed.patient) setPatient(parsed.patient);
         if (parsed.reports) setReports(parsed.reports);
       }
-    } catch (e) {
+    } catch {
       /* no saved record yet */
     } finally {
       setLoaded(true);
     }
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const persist = useCallback(async (next) => {
     try {
@@ -447,12 +449,12 @@ export default function MedLens() {
             <section>
               <h2 style={{ ...serif, fontSize: 19 }} className="mb-1">Add a medical report</h2>
               <p className="text-sm mb-4" style={{ color: C.inkSoft }}>
-                Paste the report text below. MedLens extracts test names, values, units, reference ranges and observations exactly as written — it will not invent a reference range that isn't in the text.
+                Paste the report text below. MedLens extracts test names, values, units, reference ranges and observations exactly as written - it will not invent a reference range that isn't in the text.
               </p>
               <input
                 value={draftTitle}
                 onChange={(e) => setDraftTitle(e.target.value)}
-                placeholder="Report label, e.g. \"CBC — Sept 2026\""
+                placeholder='Report label, e.g. "CBC - Sept 2026"'
                 className="w-full rounded px-3 py-2 text-sm mb-2 outline-none"
                 style={{ border: `1px solid ${C.hairline}`, background: C.panel }}
               />
@@ -606,7 +608,9 @@ function TestRow({ test, onSave }) {
   const status = computeStatus(test);
   const meta = STATUS_META[status];
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => setDraft(test), [test]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   if (editing) {
     return (
