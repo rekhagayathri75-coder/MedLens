@@ -29,6 +29,21 @@ The local backend exposes `GET http://localhost:3001/api/health` and `POST http:
 
 Set `ANTHROPIC_API_KEY` on the backend deployment. Set `VITE_API_URL` on the frontend deployment to the deployed backend URL, such as `https://your-backend.vercel.app`.
 
+## Enable Accounts And Cloud Storage
+
+1. Create a Supabase project and run `backend/supabase/schema.sql` in the SQL editor.
+2. Add these frontend environment variables:
+
+```text
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-key
+VITE_API_URL=https://your-backend.vercel.app
+```
+
+3. Set `ANTHROPIC_API_KEY` on the backend Vercel project. The browser only receives the Supabase anon key; the Anthropic key stays server-side.
+
+Without Supabase variables, the app runs in local browser-storage mode for development.
+
 ## Deploy Backend On Vercel
 
 Create a separate Vercel project for this repository with `backend` as its Root Directory. Vercel will deploy `backend/api/health.js` at `/api/health` and `backend/api/claude.js` at `/api/claude`.

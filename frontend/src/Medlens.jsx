@@ -1,4 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { extractDocumentText } from "./lib/documentText";
+import { cloudPersistenceEnabled, supabase } from "./lib/supabase";
 import {
   User, FileText, ClipboardList, MessageSquare, Clock, Pencil,
   Check, X, Download, AlertTriangle, Loader2, ArrowUp, ArrowDown, Minus,
@@ -110,9 +112,12 @@ function ProvenanceTag({ source }) {
 function ConfidenceDot({ level }) {
   const map = { high: C.normal, medium: "#B08900", low: C.high };
   const label = { high: "High confidence", medium: "Medium confidence", low: "Low confidence — please verify" };
+  const width = { high: "100%", medium: "66%", low: "33%" };
   return (
-    <span title={label[level] || "Unknown confidence"} className="inline-flex items-center gap-1 text-xs" style={{ color: C.inkSoft }}>
-      <span style={{ width: 7, height: 7, borderRadius: 999, background: map[level] || C.unknown, display: "inline-block" }} />
+    <span title={label[level] || "Unknown confidence"} className="inline-flex items-center gap-2 text-xs" style={{ color: C.inkSoft }}>
+      <span style={{ width: 30, height: 5, borderRadius: 999, background: C.hairline, display: "inline-block", overflow: "hidden" }}>
+        <span style={{ width: width[level] || "33%", height: "100%", borderRadius: 999, background: map[level] || C.unknown, display: "block" }} />
+      </span>
       {label[level] || "Unknown confidence"}
     </span>
   );
@@ -152,6 +157,22 @@ function NavItem({ icon: Icon, label, active, onClick }) {
   );
 }
 
+function AuthGate({ mode, setMode, email, setEmail, password, setPassword, busy, error, onSubmit }) {
+  return (
+    <div className="min-h-screen flex items-center justify-center p-6" style={{ background: C.page, color: C.ink }}>
+      <form onSubmit={onSubmit} className="w-full max-w-sm p-6 rounded" style={{ background: C.panel, border: `1px solid ${C.hairline}` }}>
+        <div style={{ ...serif, fontSize: 28, fontWeight: 700 }}>MedLens</div>
+        <p className="text-sm mt-1 mb-6" style={{ color: C.inkSoft }}>Secure access to your medical record.</p>
+        {error && <div className="mb-4 p-3 rounded text-sm" style={{ background: C.highSoft, color: C.high }}>{error}</div>}
+        <label className="block text-sm mb-3">Email<input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} className="mt-1 w-full rounded px-3 py-2 outline-none" style={{ border: `1px solid ${C.hairline}` }} /></label>
+        <label className="block text-sm mb-4">Password<input required minLength={6} type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 w-full rounded px-3 py-2 outline-none" style={{ border: `1px solid ${C.hairline}` }} /></label>
+        <button disabled={busy} className="w-full rounded px-4 py-2 text-sm" style={{ background: C.accent, color: "#fff", opacity: busy ? 0.6 : 1 }}>{busy ? "Working…" : mode === "sign-in" ? "Sign in" : "Create account"}</button>
+        <button type="button" onClick={() => setMode(mode === "sign-in" ? "sign-up" : "sign-in")} className="w-full mt-3 text-sm" style={{ color: C.accent }}>{mode === "sign-in" ? "Create a new account" : "I already have an account"}</button>
+      </form>
+    </div>
+  );
+}
+
 /* ---------------- main app ---------------- */
 export default function MedLens() {
   const [tab, setTab] = useState("intake");
@@ -166,24 +187,51 @@ export default function MedLens() {
   const [loaded, setLoaded] = useState(false);
   const [summary, setSummary] = useState("");
   const [summaryBusy, setSummaryBusy] = useState(false);
+  const [auditLog, setAuditLog] = useState([]);
+  const [draftFile, setDraftFile] = useState(null);
+  const [fileBusy, setFileBusy] = useState(false);
+  const [user, setUser] = useState(null);
+  const [authMode, setAuthMode] = useState("sign-in");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState("");
 
   /* load persisted record (browser localStorage) */
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem("medlens-record");
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed.patient) setPatient(parsed.patient);
-        if (parsed.reports) setReports(parsed.reports);
+    let active = true;
+    async function loadRecord() {
+      if (cloudPersistenceEnabled) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!active) return;
+        setUser(session?.user || null);
+        if (session?.user) {
+          const { data } = await supabase.from("medlens_records").select("record").eq("user_id", session.user.id).maybeSingle();
+          const parsed = data?.record;
+          if (parsed?.patient) setPatient(parsed.patient);
+          if (parsed?.reports) setReports(parsed.reports);
+          if (parsed?.summary) setSummary(parsed.summary);
+          if (parsed?.auditLog) setAuditLog(parsed.auditLog);
+        }
+      } else {
+        try {
+          const raw = localStorage.getItem("medlens-record");
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed.patient) setPatient(parsed.patient);
+            if (parsed.reports) setReports(parsed.reports);
+            if (parsed.summary) setSummary(parsed.summary);
+            if (parsed.auditLog) setAuditLog(parsed.auditLog);
+          }
+        } catch {
+          /* no saved record yet */
+        }
       }
-    } catch {
-      /* no saved record yet */
-    } finally {
-      setLoaded(true);
+      if (active) setLoaded(true);
     }
+    loadRecord();
+    return () => { active = false; };
   }, []);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   const persist = useCallback(async (next) => {
     try {
@@ -194,11 +242,54 @@ export default function MedLens() {
   }, []);
 
   useEffect(() => {
-    if (!loaded) return;
-    persist({ patient, reports });
-  }, [patient, reports, loaded, persist]);
+    if (!loaded || (cloudPersistenceEnabled && !user)) return;
+    const record = { patient, reports, summary, auditLog };
+    if (cloudPersistenceEnabled) {
+      supabase.from("medlens_records").upsert({ user_id: user.id, record, updated_at: new Date().toISOString() });
+    } else {
+      persist(record);
+    }
+  }, [patient, reports, summary, auditLog, loaded, persist, user]);
+
+  async function handleAuth(event) {
+    event.preventDefault();
+    setAuthBusy(true);
+    setAuthError("");
+    const result = authMode === "sign-in"
+      ? await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword })
+      : await supabase.auth.signUp({ email: authEmail, password: authPassword });
+    if (result.error) setAuthError(result.error.message);
+    else if (result.data.user) setUser(result.data.user);
+    setAuthBusy(false);
+  }
+
+  async function signOut() {
+    await supabase.auth.signOut();
+    setUser(null);
+    setPatient({ name: "", age: "", sex: "", symptoms: "", conditions: "", allergies: "", medications: "", notes: "" });
+    setReports([]);
+    setAuditLog([]);
+  }
 
   /* -------- extraction -------- */
+  async function handleFileUpload(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setFileBusy(true);
+    setErr(null);
+    setDraftFile(file);
+    try {
+      const text = await extractDocumentText(file);
+      setDraftText(text);
+      if (!draftTitle) setDraftTitle(file.name.replace(/\.(pdf|png|jpe?g)$/i, ""));
+    } catch (e) {
+      setErr("Couldn't read that document. Try a clearer PDF or image. (" + e.message + ")");
+    } finally {
+      setFileBusy(false);
+      event.target.value = "";
+    }
+  }
+
   async function extractReport() {
     if (!draftText.trim()) return;
     setBusy(true);
@@ -228,8 +319,10 @@ export default function MedLens() {
         createdAt: new Date().toISOString(),
       };
       setReports((r) => [report, ...r]);
+      setAuditLog((log) => [{ id: uid(), at: new Date().toISOString(), action: "Report extracted", detail: report.title }, ...log].slice(0, 100));
       setDraftText("");
       setDraftTitle("");
+      setDraftFile(null);
       setTab("record");
     } catch (e) {
       setErr("Couldn't extract structured data from that text. Try pasting the report again, or check the format. (" + e.message + ")");
@@ -239,6 +332,8 @@ export default function MedLens() {
   }
 
   function updateTest(reportId, testId, patch) {
+    const report = reports.find((item) => item.id === reportId);
+    const test = report?.tests.find((item) => item.id === testId);
     setReports((rs) =>
       rs.map((r) =>
         r.id !== reportId
@@ -246,10 +341,13 @@ export default function MedLens() {
           : { ...r, tests: r.tests.map((t) => (t.id === testId ? { ...t, ...patch, source: "user_verified" } : t)) }
       )
     );
+    if (test) setAuditLog((log) => [{ id: uid(), at: new Date().toISOString(), action: "Value verified", detail: `${test.name}: ${test.value} → ${patch.value ?? test.value}` }, ...log].slice(0, 100));
   }
 
   function deleteReport(id) {
+    const report = reports.find((item) => item.id === id);
     setReports((rs) => rs.filter((r) => r.id !== id));
+    if (report) setAuditLog((log) => [{ id: uid(), at: new Date().toISOString(), action: "Report removed", detail: report.title }, ...log].slice(0, 100));
   }
 
   /* -------- inconsistency detection (rule-based, no invented facts) -------- */
@@ -384,6 +482,10 @@ export default function MedLens() {
     setTab("intake");
   }
 
+  if (cloudPersistenceEnabled && !user && loaded) {
+    return <AuthGate mode={authMode} setMode={setAuthMode} email={authEmail} setEmail={setAuthEmail} password={authPassword} setPassword={setAuthPassword} busy={authBusy} error={authError} onSubmit={handleAuth} />;
+  }
+
   const totalTests = reports.reduce((n, r) => n + r.tests.length, 0);
   const outOfRange = reports.reduce((n, r) => n + r.tests.filter((t) => ["low", "high"].includes(computeStatus(t))).length, 0);
 
@@ -414,6 +516,7 @@ export default function MedLens() {
           <button onClick={clearRecord} disabled={!patient.name && reports.length === 0} title="Clear this local record" className="p-2 rounded" style={{ border: `1px solid ${C.hairline}`, color: C.high, background: C.panel, opacity: !patient.name && reports.length === 0 ? 0.5 : 1 }}>
             <Trash2 size={15} />
           </button>
+          {cloudPersistenceEnabled && <button onClick={signOut} className="text-xs px-2 py-2" style={{ color: C.inkSoft }}>{user?.email} · sign out</button>}
         </div>
       </div>
 
@@ -487,6 +590,10 @@ export default function MedLens() {
                 className="w-full rounded px-3 py-2 text-sm mb-2 outline-none"
                 style={{ border: `1px solid ${C.hairline}`, background: C.panel }}
               />
+              <label className="flex items-center gap-2 text-sm px-3 py-2 rounded mb-2 cursor-pointer" style={{ border: `1px dashed ${C.hairline}`, color: C.accent, background: C.accentSoft }}>
+                <FileText size={15} /> {fileBusy ? "Reading document with OCR…" : draftFile ? `${draftFile.name} loaded` : "Upload PDF or image"}
+                <input type="file" accept="application/pdf,image/png,image/jpeg" onChange={handleFileUpload} disabled={fileBusy} className="sr-only" />
+              </label>
               <textarea
                 value={draftText}
                 onChange={(e) => setDraftText(e.target.value)}
@@ -530,10 +637,16 @@ export default function MedLens() {
                         <Trash2 size={13} /> Remove
                       </button>
                     </div>
-                    <div className="divide-y" style={{ borderColor: C.hairline }}>
-                      {r.tests.map((t) => (
-                        <TestRow key={t.id} test={t} onSave={(patch) => updateTest(r.id, t.id, patch)} />
-                      ))}
+                    <div className="grid lg:grid-cols-2">
+                      <div className="p-4 max-h-96 overflow-auto" style={{ background: "#FBFAF7", borderRight: `1px solid ${C.hairline}` }}>
+                        <div className="text-xs font-semibold mb-2" style={{ color: C.inkSoft }}>Original source</div>
+                        <pre className="whitespace-pre-wrap text-xs leading-relaxed" style={{ ...mono, color: C.inkSoft }}>{r.rawText || "No source text saved."}</pre>
+                      </div>
+                      <div className="divide-y" style={{ borderColor: C.hairline }}>
+                        {r.tests.map((t) => (
+                          <TestRow key={t.id} test={t} onSave={(patch) => updateTest(r.id, t.id, patch)} />
+                        ))}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -618,6 +731,12 @@ export default function MedLens() {
                   </div>
                 ))}
               </div>
+              <h3 style={{ ...serif, fontSize: 16 }} className="mt-6 mb-2">Audit trail</h3>
+              {auditLog.length === 0 ? <div className="text-sm" style={{ color: C.inkSoft }}>Edits and verification events will appear here.</div> : (
+                <div className="space-y-1">
+                  {auditLog.slice(0, 12).map((event) => <div key={event.id} className="flex items-center gap-2 text-xs py-1.5" style={{ borderBottom: `1px solid ${C.hairline}` }}><span style={{ color: C.inkSoft }}>{new Date(event.at).toLocaleString()}</span><strong>{event.action}</strong><span style={{ color: C.inkSoft }}>{event.detail}</span></div>)}
+                </div>
+              )}
             </section>
           )}
         </div>
