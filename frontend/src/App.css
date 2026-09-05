@@ -1,4 +1,4 @@
-/* Print styles for clinical summary export */
+/* Modern print styles for clinical summary export */
 @media print {
   body {
     background: #ffffff !important;
@@ -44,21 +44,35 @@
   }
 }
 
-/* Custom scrollbar styling for ledger look */
+/* Custom scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #F6F4EF;
+  background: #F8F6F1;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #DCD6C9;
-  border-radius: 3px;
+  background: #D8D2C4;
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #5B6B67;
+  background: #7B8B87;
+}
+
+/* Subtle glowing pulse for critical alerts */
+@keyframes subtle-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.75;
+  }
+}
+
+.animate-subtle-pulse {
+  animation: subtle-pulse 2.5s infinite ease-in-out;
 }
