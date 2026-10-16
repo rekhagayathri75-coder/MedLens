@@ -1,65 +1,68 @@
-# MedLens
+# SafeCircle - Living-Alone Check-In Circle
 
-MedLens is organized as two applications:
+A consent-based check-in prototype. You set a daily check-in time, choose trusted
+contacts, tap **I'm Okay**, and decide what should happen if you miss a check-in.
 
-- `frontend/` contains the React and Vite client.
-- `backend/` contains the Node.js API server and Vercel functions.
+**Important:** every reminder and escalation step is **simulated**. SafeCircle never
+sends a message, never tracks location, collects no health data, and is **not** an
+emergency service. A missed check-in is not treated as proof that anyone is unsafe.
 
-### Features
-- **Visual Reference Range Gauges**: Color-coded boundary bars with marker pins for low, normal, and high intervals.
-- **Interactive Longitudinal SVG Trend Charts**: Shaded reference bands, tooltips, and shift metrics across dates.
-- **Resilient Multi-Mode Extraction**: Claude 3.5 Haiku API proxy with automatic client-side heuristic regex fallback.
-- **In-Browser OCR & Document Ingestion**: PDF.js and Tesseract OCR with drag-and-drop document upload.
-- **Multi-Format Clinical Exports**: Print-ready Clinician Consultation Sheet (`window.print()`), CSV table, JSON, and text.
-- **Drug-Allergy & Safety Alerts**: Detects medication/allergy overlaps and critical lab value thresholds.
-- **Sample Clinical Scenario**: One-click demo patient data loader for instant testing.
+## Run it on Windows
 
-## Development
+Open **Command Prompt** (not PowerShell, to avoid script-permission issues) in this folder:
 
-Install frontend dependencies:
-
-```bash
-npm install --prefix frontend
+```
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+streamlit run app.py
 ```
 
-Run the frontend:
+The app opens at http://localhost:8501. Next time, you only need:
 
-```bash
-npm run dev:frontend
+```
+venv\Scripts\activate
+streamlit run app.py
 ```
 
-Run the local backend in a second terminal:
+(If `python` is not found, try `py` instead, e.g. `py -m venv venv`.)
 
-```bash
-npm run dev:backend
+## Run the automated tests
+
+```
+python -m unittest -v
 ```
 
-The local backend exposes `GET http://localhost:3001/api/health` and `POST http://localhost:3001/api/claude`.
+## Files
 
-Set `ANTHROPIC_API_KEY` on the backend deployment. Set `VITE_API_URL` on the frontend deployment to the deployed backend URL, such as `https://your-backend.vercel.app`.
+| File | Job |
+|---|---|
+| `app.py` | The screens (Streamlit): dashboard, schedule, contacts, privacy, history, demo |
+| `logic.py` | The rules: state flow, check-in, contacts, demo mode |
+| `db.py` | SQLite tables and small read/write helpers |
+| `test_logic.py` | Automated tests for `logic.py` and `db.py` |
+| `.streamlit/config.toml` | Light theme and colours |
+| `safecircle.db` | Created automatically on first run |
 
-## Enable Accounts And Cloud Storage
+## The state flow
 
-1. Create a Supabase project and run `backend/supabase/schema.sql` in the SQL editor.
-2. Add these frontend environment variables:
+Upcoming -> Due -> Overdue (first reminder) -> Second confirmation prompt ->
+Your chosen next action -> Checked in / resolved.
 
-```text
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=your-anon-key
-VITE_API_URL=https://your-backend.vercel.app
-```
+Timings come from your settings: grace period, and the gap between steps.
 
-3. Set `ANTHROPIC_API_KEY` on the backend Vercel project. The browser only receives the Supabase anon key; the Anthropic key stays server-side.
+## Demo (no waiting)
 
-Without Supabase variables, the app runs in local browser-storage mode for development.
+1. **Demo mode** page -> *Reset demo data* (fictional contacts, clock set to 7:30 AM).
+2. Scenario 1: Dashboard -> *I'm Okay* -> look at the timestamp and *Activity history*.
+3. Scenario 2: *Simulate missed check-in* -> *Test next escalation step* (twice) ->
+   open *Privacy & consent* and *Activity history* -> *I'm Okay* to resolve.
 
-## Deploy Backend On Vercel
+The "demo clock" only shifts the app's own idea of "now". Your computer's clock is untouched.
 
-Create a separate Vercel project for this repository with `backend` as its Root Directory. Vercel will deploy `backend/api/health.js` at `/api/health` and `backend/api/claude.js` at `/api/claude`.
+## Known limitations
 
-## Checks
-
-```bash
-npm run build
-npm run lint
-```
+- Reminders appear only inside the app, and only while the page is open. There are no
+  push notifications, emails or SMS, by design.
+- One user, one device, no login. Anyone with access to this computer can open the app.
+- While the demo clock is on, timestamps in history use the demo clock.

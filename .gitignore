@@ -22,3 +22,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Python & SafeCircle
+__pycache__/
+*.py[cod]
+*$py.class
+safecircle.db
+venv/
