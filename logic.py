@@ -192,27 +192,43 @@ def sync_state(conn):
     """
     settings = db.get_settings(conn)
     now = app_now(settings)
-    today = now.date().isoformat()
+    today_date = now.date()
+    today_due = due_datetime(settings, today_date)
+    yesterday_date = today_date - timedelta(days=1)
+    yesterday_due = due_datetime(settings, yesterday_date)
 
-    # A new day? Close the old one and start fresh.
-    if settings["cycle_date"] != today:
+    grace = timedelta(minutes=settings["grace_minutes"])
+    gap = timedelta(minutes=settings["prompt_gap_minutes"])
+    escalation_window = grace + 2 * gap
+
+    # Determine if yesterday's check-in extends past midnight and is the active cycle
+    if yesterday_due + escalation_window >= datetime.combine(today_date, datetime.min.time()) and now < yesterday_due + escalation_window + timedelta(hours=2):
+        active_day = yesterday_date.isoformat()
+        due = yesterday_due
+        next_due_after_checkin = today_due
+    else:
+        active_day = today_date.isoformat()
+        due = today_due
+        next_due_after_checkin = due_datetime(settings, today_date + timedelta(days=1))
+
+    # A new day or cycle? Close the old one and start fresh.
+    if settings["cycle_date"] != active_day:
         first_run = settings["cycle_date"] is None  # brand-new install, or data was erased
         _close_old_cycle(conn, settings, now)
-        db.update_settings(conn, cycle_date=today, escalation_stage=0)
-        if first_run and due_datetime(settings, now.date()) <= now:
+        db.update_settings(conn, cycle_date=active_day, escalation_stage=0)
+        if first_run and due <= now:
             # Don't count a time that passed before the routine even existed as "missed".
-            db.update_settings(conn, skip_date=today)
+            db.update_settings(conn, skip_date=active_day)
         settings = db.get_settings(conn)
 
-    checkin = db.get_checkin_for_date(conn, today)
-    due = due_datetime(settings, now.date())
+    checkin = db.get_checkin_for_date(conn, active_day)
     stage = 0
 
     if checkin:
         status = "checked_in"
     elif settings["paused"]:
         status = "paused"
-    elif settings["skip_date"] == today:
+    elif settings["skip_date"] == active_day:
         status = "resumed"
     else:
         # The stage is whichever is further along: the clock, or a manual "test next step".
@@ -223,9 +239,8 @@ def sync_state(conn):
         status = STATUS_BY_STAGE[stage]
 
     # When is the next check-in due?
-    tomorrow_due = due_datetime(settings, now.date() + timedelta(days=1))
     if checkin or status == "resumed" or (status == "paused" and due <= now):
-        next_due = tomorrow_due
+        next_due = next_due_after_checkin
     else:
         next_due = due
 
@@ -245,6 +260,7 @@ def sync_state(conn):
         "contacts": contacts,
         "selected_contacts": [c for c in contacts if c["include_in_escalation"]],
         "demo_clock_on": settings["demo_offset_minutes"] != 0,
+        "active_day": active_day,
     }
 
 
@@ -253,9 +269,9 @@ def check_in(conn):
     """The "I'm Okay" button. Returns (success, message)."""
     state = sync_state(conn)
     now = state["now"]
-    today = now.date().isoformat()
+    active_day = state.get("active_day", now.date().isoformat())
 
-    saved = db.insert_checkin(conn, today, now.strftime(db.TS_FORMAT))
+    saved = db.insert_checkin(conn, active_day, now.strftime(db.TS_FORMAT))
     if not saved:
         existing = state["checkin"]
         when = fmt_clock(parse_ts(existing["checked_at"])) if existing else "earlier"
@@ -264,9 +280,10 @@ def check_in(conn):
     _log(conn, now, "checkin", "Checked in - tapped \"I'm Okay\".")
     if state["stage"] >= 2:
         _log(conn, now, "resolved", "Alert resolved: you checked in, so the reminder flow was reset.")
-    db.update_settings(conn, escalation_stage=0, skip_date=None, cycle_date=today)
+    db.update_settings(conn, escalation_stage=0, skip_date=None, cycle_date=active_day)
 
-    next_due = due_datetime(state["settings"], now.date() + timedelta(days=1))
+    new_state = sync_state(conn)
+    next_due = new_state["next_due"]
     name = state["settings"]["user_name"]
     return True, f"Thanks, {name}! You're checked in at {fmt_clock(now)}. Next check-in: {fmt_dt(next_due)}."
 
@@ -388,20 +405,18 @@ def simulate_missed(conn):
     """Jump the app clock to just after the grace period so the check-in is overdue."""
     settings = db.get_settings(conn)
     now = app_now(settings)
-    today = now.date().isoformat()
-
-    note = ""
-    if db.delete_checkin_for_date(conn, today):
-        note = " Today's check-in was cleared so the scenario can be shown."
 
     due = due_datetime(settings, now.date())
     target = due + timedelta(minutes=settings["grace_minutes"] + 1)
-    end_of_day = datetime.combine(now.date(), datetime.min.time()).replace(hour=23, minute=59)
-    target = min(target, end_of_day)
+
+    note = ""
+    if db.delete_checkin_for_date(conn, due.date().isoformat()):
+        note = " Today's check-in was cleared so the scenario can be shown."
+
     offset = round((target - real_now()).total_seconds() / 60)
 
     db.update_settings(
-        conn, demo_offset_minutes=offset, escalation_stage=0, cycle_date=today,
+        conn, demo_offset_minutes=offset, escalation_stage=0, cycle_date=due.date().isoformat(),
         skip_date=None, paused=0,
     )
     _log(conn, target, "simulation", "DEMO: simulated a missed check-in by moving the demo clock forward." + note)

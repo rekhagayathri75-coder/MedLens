@@ -251,6 +251,22 @@ class SafeCircleTests(unittest.TestCase):
         self.assertFalse(self.state()["demo_clock_on"])
         self.assertEqual(self.state()["now"], FIXED_NOW["value"])
 
+    def test_simulate_missed_near_midnight(self):
+        for t in ("23:45", "23:59", "00:00", "00:05"):
+            self.run_logic(logic.reset_demo)
+            self.run_logic(logic.set_schedule, t, 30, 15, "notify_contacts", "Alex")
+            self.run_logic(logic.simulate_missed)
+            s = self.state()
+            self.assertEqual(s["status"], "overdue", f"Failed status for {t}")
+            self.assertEqual(s["stage"], 2, f"Failed stage for {t}")
+            # Can also advance to second prompt and resolve
+            ok, _ = self.run_logic(logic.advance_escalation)
+            self.assertTrue(ok)
+            self.assertEqual(self.state()["status"], "second_prompt")
+            ok, _ = self.run_logic(logic.check_in)
+            self.assertTrue(ok)
+            self.assertEqual(self.state()["status"], "checked_in")
+
 
 if __name__ == "__main__":
     unittest.main()

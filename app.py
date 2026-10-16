@@ -159,13 +159,33 @@ def demo_clock_banner(state):
         )
 
 
+if hasattr(st, "dialog"):
+    @st.dialog("Confirm Demo Data Reset")
+    def confirm_reset_dialog():
+        st.warning(
+            "⚠️ **Warning:** Resetting demo data will erase all current settings, contacts, "
+            "check-ins, and activity history, replacing them with fictional sample data."
+        )
+        st.write("Are you sure you want to proceed?")
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Yes, reset demo data", type="primary", key="dialog_confirm_reset_yes"):
+                flash("success", run(logic.reset_demo))
+                st.rerun()
+        with c2:
+            if st.button("Cancel", key="dialog_cancel_reset_no"):
+                st.rerun()
+
+
 def demo_controls(prefix):
     """The four demo buttons. 'prefix' keeps their keys unique when shown on two pages."""
     c1, c2, c3, c4 = st.columns(4)
     with c1:
         if st.button("🔄 Reset demo data", key=f"{prefix}_reset"):
-            flash("success", run(logic.reset_demo))
-            st.rerun()
+            if hasattr(st, "dialog"):
+                confirm_reset_dialog()
+            else:
+                st.session_state[f"show_reset_{prefix}"] = True
     with c2:
         if st.button("⏰ Simulate missed check-in", key=f"{prefix}_missed"):
             flash("info", run(logic.simulate_missed))
@@ -179,6 +199,23 @@ def demo_controls(prefix):
         if st.button("🕒 Return to real time", key=f"{prefix}_real"):
             flash("info", run(logic.return_to_real_time))
             st.rerun()
+
+    # Fallback confirmation for environments where st.dialog is not available
+    if not hasattr(st, "dialog") and st.session_state.get(f"show_reset_{prefix}"):
+        st.warning(
+            "⚠️ **Warning:** Resetting demo data will erase all current settings, contacts, "
+            "check-ins, and activity history, replacing them with fictional sample data."
+        )
+        conf_a, conf_b = st.columns(2)
+        with conf_a:
+            if st.button("Yes, reset demo data", type="primary", key=f"{prefix}_confirm_reset_action"):
+                st.session_state[f"show_reset_{prefix}"] = False
+                flash("success", run(logic.reset_demo))
+                st.rerun()
+        with conf_b:
+            if st.button("Cancel", key=f"{prefix}_cancel_reset_action"):
+                st.session_state[f"show_reset_{prefix}"] = False
+                st.rerun()
 
 
 # ============================================================ pages
@@ -238,7 +275,12 @@ def page_dashboard(state):
                     unsafe_allow_html=True)
 
     # --- Reminder / escalation status
-    st.subheader("Reminder & escalation status")
+    col_stat_title, col_stat_ref = st.columns([3, 1])
+    with col_stat_title:
+        st.subheader("Reminder & escalation status")
+    with col_stat_ref:
+        if st.button("🔄 Refresh status", key="dash_refresh_btn", use_container_width=True):
+            st.rerun()
     stepper(state)
     render_escalation_panel(state)
 
@@ -549,7 +591,26 @@ def main():
         with st.sidebar:
             st.markdown("### 🤝 SafeCircle")
             page = st.radio("Go to", PAGES, key="page")
+            st.write("")
+            if st.button("🔄 Refresh status", key="sidebar_refresh", use_container_width=True):
+                st.rerun()
+            auto_live = st.checkbox("Live auto-refresh (every 10s)", value=False, key="auto_refresh_toggle")
             st.caption("🔒 Your data stays on this computer. Nobody is contacted automatically.")
+
+        # Non-intrusive live auto-refresh for overview screens (Dashboard and Demo)
+        if auto_live and page in ("Dashboard", "Demo mode"):
+            import streamlit.components.v1 as components
+            components.html(
+                """
+                <script>
+                setTimeout(function() {
+                    window.parent.location.reload();
+                }, 10000);
+                </script>
+                """,
+                height=0,
+                width=0,
+            )
 
         show_flash()
         {
@@ -560,12 +621,30 @@ def main():
             "Activity history": page_history,
             "Demo mode": page_demo,
         }[page](state)
-    except sqlite3.Error as err:
+    except Exception as err:
+        st.markdown('<div class="sc-title">SafeCircle 🤝</div>', unsafe_allow_html=True)
         st.error(
-            "Something went wrong with the local database. Your screen is safe, "
-            "but this action could not be saved. Try again, or use 'Reset demo data' on the Demo page."
+            "**Database Startup Issue:** Something went wrong with the local database (`safecircle.db`). "
+            "The database could not be opened or initialized properly."
         )
-        st.caption(f"Technical detail: {err}")
+        st.caption(f"Technical details: {err}")
+        st.write("")
+        st.info(
+            "Your data stays on this computer. If the database file is corrupted or unreadable, "
+            "you can delete the local database and start fresh with a clean database:"
+        )
+        col_wipe, _ = st.columns([1, 2])
+        with col_wipe:
+            if st.button("🗑 Delete local data and start fresh", type="primary", key="startup_reset_data"):
+                try:
+                    if db.DB_PATH.exists():
+                        db.DB_PATH.unlink()
+                    db.init_db()
+                    st.success("Local data deleted. Starting fresh with clean database...")
+                    st.rerun()
+                except Exception as reset_err:
+                    st.error(f"Could not automatically delete the file: {reset_err}")
+                    st.warning(f"Please manually delete the file: {db.DB_PATH}")
 
 
 main()
